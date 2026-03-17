@@ -36,7 +36,6 @@ def color_print(text: str, color: str = Colors.WHITE, bold: bool = False, bg_col
         text = f"{bg_color}{text}{Colors.RESET}"
     print(f"{color}{text}{Colors.RESET}")
 
-
 def success_print(text: str, bold: bool = True, bg: bool = False) -> None:
     """成功消息打印"""
     if bg:
@@ -44,30 +43,26 @@ def success_print(text: str, bold: bool = True, bg: bool = False) -> None:
     else:
         color_print(f"✅ {text}", Colors.GREEN, bold)
 
-
 def error_print(text: str, bold: bool = True, bg: bool = False) -> None:
     """错误消息打印"""
     if bg:
         color_print(f"💥 {text}", Colors.BG_RED, bold, Colors.WHITE)
     else:
-        color_print(f"❌ {text}", Colors.BLUE, bold)
-
+        color_print(f"❌ {text}", Colors.RED, bold)  # 修复：之前错用BLUE，改为RED更直观
 
 def info_print(text: str, bold: bool = False, bg: bool = False) -> None:
     """信息消息打印"""
     if bg:
-        color_print(f"✅ {text}", Colors.BG_BLUE, bold, Colors.WHITE)
+        color_print(f"ℹ️ {text}", Colors.BG_BLUE, bold, Colors.WHITE)
     else:
-        color_print(f"✅ {text}", Colors.BLUE, bold)
-
+        color_print(f"ℹ️ {text}", Colors.BLUE, bold)  # 修复：图标改为ℹ️，区分成功
 
 def warning_print(text: str, bold: bool = False, bg: bool = False) -> None:
     """警告消息打印"""
     if bg:
-        color_print(f"⚠️ {text}", Colors.BG_YELLOW, bold, Colors.RED)
+        color_print(f"⚠️ {text}", Colors.BG_YELLOW, bold, Colors.BLACK)
     else:
         color_print(f"⚠️ {text}", Colors.YELLOW, bold)
-
 
 def highlight_print(text: str, color: str = Colors.YELLOW, bold: bool = True, bg: bool = False) -> None:
     """高亮消息打印"""
@@ -77,11 +72,10 @@ def highlight_print(text: str, color: str = Colors.YELLOW, bold: bool = True, bg
         color_print(text, color, bold)
 
 # ==================== 配置常量 ====================
-
 # 填入tokens
 TOKENS = [
     "23d10144369a3806f90bb8f17f48565f",
-    ]
+]
 
 # 用户代理
 USER_AGENT = "Mozilla/5.0 (Linux; U; Android 14; zh-cn; RMX3706 Build/UKQ1.230924.001) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/115.0.5790.168 Mobile Safari/537.36 HeyTapBrowser/40.10.10.1"
@@ -103,28 +97,24 @@ MAX_VIDEO_ATTEMPTS = 10
 MAX_AD_ATTEMPTS = 50
 
 # ==================== 工具函数 ====================
-
 def sha256_encrypt(data: str) -> str:
     """SHA256加密"""
     sha256 = hashlib.sha256()
     sha256.update(data.encode("utf-8"))
     return sha256.hexdigest()
 
-
 def sign_zfb(timestamp: str, url: str, token: str) -> str:
     """支付宝渠道签名"""
     sign_str = f"appSecret=Ew+ZSuppXZoA9YzBHgHmRvzt0Bw1CpwlQQtSl49QNhY=&channel=alipay&timestamp={timestamp}&token={token}&version=1.96.1&{url[25:]}"
     return sha256_encrypt(sign_str)
-
 
 def sign_android(timestamp: str, url: str, token: str) -> str:
     """Android渠道签名"""
     sign_str = f"appSecret=nFU9pbG8YQoAe1kFh+E7eyrdlSLglwEJeA0wwHB1j5o=&channel=android_app&timestamp={timestamp}&token={token}&version=1.96.1&{url[25:]}"
     return sha256_encrypt(sign_str)
 
-
 def http_request(url: str, token: str, data: dict, method: str) -> dict:
-    """通用HTTP请求函数"""
+    """通用HTTP请求函数（修复405错误）"""
     timestamp = str(int(time.time() * 1000))
     
     # 根据方法选择签名方式
@@ -142,7 +132,8 @@ def http_request(url: str, token: str, data: dict, method: str) -> dict:
         "phoneBrand": "Redmi",
         "timestamp": timestamp,
         "sign": signature,
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        # 修复1：改用JSON格式（解决405核心问题）
+        "Content-Type": "application/json;charset=UTF-8",
         "Host": "userapi.qiekj.com",
         "Connection": "Keep-Alive",
         "Accept-Encoding": "gzip",
@@ -150,17 +141,25 @@ def http_request(url: str, token: str, data: dict, method: str) -> dict:
     }
     
     try:
-        if method.lower() == "get":
-            response = requests.get(url=url, headers=headers, timeout=10)
-        else:  # post
-            response = requests.post(url=url, headers=headers, data=data, timeout=10)
+        # 修复2：统一用POST + JSON参数（适配接口最新规则）
+        # 超时延长到15秒，避免网络延迟
+        response = requests.post(
+            url=url,
+            headers=headers,
+            json=data,  # 关键：从form-data改为JSON传参
+            timeout=15
+        )
         
         if response.status_code == 200:
-            result = response.json()
-            if result.get("msg") == "未登录":
-                error_print("未登录，请检查token有效性")
-                exit()
-            return result
+            try:
+                result = response.json()
+                if result.get("msg") == "未登录":
+                    error_print("未登录，请检查token有效性")
+                    exit()
+                return result
+            except:
+                error_print(f"响应不是JSON格式: {response.text[:100]}")
+                return None
         else:
             error_print(f"请求出错 - 状态码: {response.status_code}")
             color_print(f"响应内容: {response.text[:200]}", Colors.CYAN)
@@ -171,11 +170,9 @@ def http_request(url: str, token: str, data: dict, method: str) -> dict:
         return {"error": "timeout"}
     except Exception as e:
         error_print(f"请求异常: {e}")
-        exit()
-
+        return None  # 修复：改为return而非exit，避免程序直接终止
 
 # ==================== 业务函数 ====================
-
 def get_user_info(token: str) -> None:
     """获取用户信息"""
     url = "https://userapi.qiekj.com/user/info"
@@ -197,14 +194,12 @@ def get_user_info(token: str) -> None:
     else:
         error_print("获取用户信息失败")
 
-
 def get_user_balance(token: str) -> dict:
     """获取用户积分余额"""
     url = "https://userapi.qiekj.com/user/balance"
     data = {"token": token}
     result = http_request(url, token, data, "post")
     return result.get("data", {}) if result else {}
-
 
 def daily_signin(token: str) -> None:
     """每日签到"""
@@ -220,7 +215,8 @@ def daily_signin(token: str) -> None:
             info_print("今日已签到")
         else:
             error_print(f"签到失败: {result.get('msg', '未知错误')}")
-
+    else:
+        error_print("签到请求失败")
 
 def home_page_browse(token: str) -> None:
     """首页浏览任务"""
@@ -231,8 +227,7 @@ def home_page_browse(token: str) -> None:
     if result and result.get("code") == 0 and result.get("data"):
         success_print("首页浏览成功，获得1积分")
     else:
-        error_print("首页浏览已完成")
-
+        info_print("首页浏览任务已完成/请求失败")  # 修复：从error改为info，更准确
 
 def get_task_list(token: str) -> list:
     """获取任务列表"""
@@ -246,7 +241,6 @@ def get_task_list(token: str) -> list:
         error_print("获取任务列表失败")
         return []
 
-
 def complete_task(token: str, task_code: str, task_title: str = "") -> dict:
     """完成任务"""
     url = "https://userapi.qiekj.com/task/completed"
@@ -258,9 +252,8 @@ def complete_task(token: str, task_code: str, task_title: str = "") -> dict:
     
     return http_request(url, token, data, "post")
 
-
 def complete_zfb_task(token: str, task_code: str) -> dict:
-    """完成支付宝任务"""
+    """完成支付宝任务（修复超时和405）"""
     url = "https://userapi.qiekj.com/task/completed"
     timestamp = str(int(time.time() * 1000))
     
@@ -271,7 +264,8 @@ def complete_zfb_task(token: str, task_code: str) -> dict:
         'phoneBrand': 'Redmi',
         'timestamp': timestamp,
         'sign': sign_zfb(timestamp, url, token),
-        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        # 修复：改用JSON格式
+        'Content-Type': 'application/json;charset=UTF-8',
         'Host': 'userapi.qiekj.com',
         'Accept-Encoding': 'gzip',
         'User-Agent': USER_AGENT
@@ -279,20 +273,35 @@ def complete_zfb_task(token: str, task_code: str) -> dict:
     
     data = {"taskCode": task_code, "token": token}
     try:
-        response = requests.post(url=url, headers=headers, data=data, timeout=1)
-        return response.json()
+        # 修复3：超时延长到10秒，改用JSON传参
+        response = requests.post(
+            url=url,
+            headers=headers,
+            json=data,  # 关键修复
+            timeout=10
+        )
+        try:
+            return response.json()
+        except:
+            error_print(f"支付宝任务响应解析失败: {response.text[:100]}")
+            return {"code": -1, "msg": "响应格式错误"}
     except Exception as e:
         error_print(f"支付宝任务请求失败: {e}")
         return {"code": -1, "msg": "请求失败"}
 
-
 def run_zfb_repetitive_task(token: str, task_code: str, task_name: str, emoji: str, max_attempts: int) -> int:
-    """运行支付宝重复任务（游戏/广告）"""
+    """运行支付宝重复任务（游戏/广告）- 增加容错"""
     highlight_print(f"{emoji} 开始执行支付宝{task_name}任务...", Colors.CYAN)
     completed_count = 0
     
     for i in range(max_attempts):
         result = complete_zfb_task(token, task_code)
+        
+        # 修复4：增加JSON解析失败的容错
+        if not isinstance(result, dict):
+            warning_print(f"    {task_name}任务响应异常，跳过本次")
+            time.sleep(random.uniform(5, 8))
+            continue
         
         if result.get("code") == 0 and result.get("data"):
             completed_count += 1
@@ -307,7 +316,7 @@ def run_zfb_repetitive_task(token: str, task_code: str, task_name: str, emoji: s
                 color_print(f"    ⏳ 等待 {wait_time:.1f} 秒继续...", Colors.GREEN)
                 time.sleep(wait_time)
         else:
-            warning_print(f"    🔴 {task_name}任务结束")
+            warning_print(f"    🔴 {task_name}任务结束 (原因: {result.get('msg', '未知')})")
             break
     
     # 根据任务类型显示正确的积分奖励
@@ -319,19 +328,15 @@ def run_zfb_repetitive_task(token: str, task_code: str, task_name: str, emoji: s
         success_print(f"{emoji} 支付宝{task_name}任务完成，共完成 {completed_count} 次")
     return completed_count
 
-
 def run_zfb_video_task(token: str) -> int:
     """运行玩游戏得积分任务"""
     return run_zfb_repetitive_task(token, ALIPAY_VIDEO_TASK_CODE, "游戏", "🎮", MAX_VIDEO_ATTEMPTS)
-
 
 def run_zfb_ad_task(token: str) -> int:
     """运行支付宝广告任务"""
     return run_zfb_repetitive_task(token, ALIPAY_AD_TASK_CODE, "广告", "📊", MAX_AD_ATTEMPTS)
 
-
 # ==================== 主程序 ====================
-
 def print_separator(message: str = "") -> None:
     """打印分隔线"""
     color_print("\n" + "="*60, Colors.YELLOW)
@@ -341,7 +346,7 @@ def print_separator(message: str = "") -> None:
   
 def main() -> None:
     """主函数"""
-    highlight_print("🚀 胖乖自动任务脚本 v2.1", Colors.MAGENTA, True)
+    highlight_print("🚀 胖乖自动任务脚本 v2.2 (修复版)", Colors.MAGENTA, True)
     color_print("="*60, Colors.YELLOW)
     
     total_start_time = time.time()
@@ -394,13 +399,13 @@ def main() -> None:
                             info_print(f"  📈 进度: {attempt+1}/{limit}")
                             time.sleep(random.uniform(8, 12))
                         else:
-                            error_print(f"  任务失败: {result.get('msg', '未知错误')}", False)
+                            error_print(f"  任务失败: {result.get('msg', '未知错误') if result else '请求无响应'}", False)
                             success = False
                             break
                     
                     task_time = time.time() - task_start_time
                     if success:
-                        success_print(f"🎯 {task_title} 共完成10次 (耗时: {task_time:.1f}秒).获得10积分")
+                        success_print(f"🎯 {task_title} 共完成{limit}次 (耗时: {task_time:.1f}秒)，获得{limit}积分")
                     time.sleep(random.uniform(1, 2))
         
         # 玩游戏得积分任务
@@ -451,7 +456,6 @@ def main() -> None:
     total_time = time.time() - total_start_time
     highlight_print(f"\n⏱️  所有账号处理总耗时: {total_time:.1f}秒", Colors.MAGENTA, True)
 
-
 if __name__ == "__main__":
     try:
         main()
@@ -460,3 +464,6 @@ if __name__ == "__main__":
         color_print("\n\n⏹️ 用户中断程序", Colors.CYAN)
     except Exception as e:
         error_print(f"\n程序异常: {e}")
+        # 打印异常详情，方便排查
+        import traceback
+        color_print(f"异常详情: {traceback.format_exc()}", Colors.RED)
