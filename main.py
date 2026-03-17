@@ -114,7 +114,7 @@ def sign_android(timestamp: str, url: str, token: str) -> str:
     return sha256_encrypt(sign_str)
 
 def http_request(url: str, token: str, data: dict, method: str) -> dict:
-    """通用HTTP请求函数（修复405错误）"""
+    """通用HTTP请求函数（模拟真实APP环境）"""
     timestamp = str(int(time.time() * 1000))
     
     # 根据方法选择签名方式
@@ -125,29 +125,45 @@ def http_request(url: str, token: str, data: dict, method: str) -> dict:
         signature = sign_android(timestamp, url, token)
         channel = "android_app"
     
+    # 核心修改：模拟真实APP的请求头（新增设备指纹字段）
     headers = {
         "Authorization": token,
         "Version": "1.96.1",
         "channel": channel,
-        "phoneBrand": "Redmi",
+        "phoneBrand": "realme",  # 匹配你的设备 RMX3706（真我手机）
+        "phoneModel": "RMX3706", # 新增：真实机型
+        "systemVersion": "14",   # 新增：系统版本
+        "appVersion": "1.96.1",  # 新增：APP版本
+        "deviceId": "868888888888888", # 新增：模拟设备ID（可替换为真实的）
         "timestamp": timestamp,
         "sign": signature,
-        # 修复1：改用JSON格式（解决405核心问题）
         "Content-Type": "application/json;charset=UTF-8",
         "Host": "userapi.qiekj.com",
         "Connection": "Keep-Alive",
         "Accept-Encoding": "gzip",
-        "User-Agent": USER_AGENT
+        "User-Agent": USER_AGENT,
+        # 新增：隐藏Python请求特征
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://userapi.qiekj.com/",
+        "Origin": "https://userapi.qiekj.com/"
     }
     
     try:
-        # 修复2：统一用POST + JSON参数（适配接口最新规则）
-        # 超时延长到15秒，避免网络延迟
-        response = requests.post(
+        # 核心修改：使用会话保持，模拟真实APP的cookie/登录态
+        session = requests.Session()
+        # 先访问首页，获取cookie
+        session.get("https://userapi.qiekj.com/", headers=headers, timeout=15)
+        
+        response = session.post(
             url=url,
             headers=headers,
-            json=data,  # 关键：从form-data改为JSON传参
-            timeout=15
+            json=data,
+            timeout=15,
+            # 新增：禁用代理，模拟真实网络环境
+            proxies={"http": None, "https": None},
+            # 新增：模拟移动端请求的TCP参数
+            stream=False,
+            verify=False  # 忽略SSL验证（APP端通常不验证）
         )
         
         if response.status_code == 200:
@@ -170,7 +186,7 @@ def http_request(url: str, token: str, data: dict, method: str) -> dict:
         return {"error": "timeout"}
     except Exception as e:
         error_print(f"请求异常: {e}")
-        return None  # 修复：改为return而非exit，避免程序直接终止
+        return None
 
 # ==================== 业务函数 ====================
 def get_user_info(token: str) -> None:
